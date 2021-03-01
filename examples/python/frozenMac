@@ -1,0 +1,78 @@
+#!/isan/bin/nxpython
+
+################################################################
+# File:   frozenMac
+##################################################################
+
+import re
+import sys
+import json
+import nx_sdk_py
+
+
+def parseOutput(output):
+    regex = r"(?P<vlan>\d+)\s+(?P<mac>\S+\.\S+\.\S+)\s+(?P<frozen_date>.+)"
+    # for testing purposes
+    output = ("Topology    Mac Address    Frozen time\n"
+                "----------- -------------- ---------------------------\n"
+                "2008        0200.dead.beef Tue Feb 16 10:59:36.969 MSK\n"
+                "2009        aaaa.dead.beef Tue Feb 16 10:59:36.969 MSK\n")
+    matches = re.finditer(regex, output, re.MULTILINE)
+    result = []
+    for match in matches:
+        result.append({'vlan': match.group('vlan'), 'mac': match.group('mac'), 'frozen_date': match.group('frozen_date')})
+    return json.dumps(result)
+
+
+class pyCmdHandler(nx_sdk_py.NxCmdHandler):
+
+        def postCliCb(self, cmd):
+            global cli_parser
+
+            if "show_permanently-frozen-mac" in cmd.getCmdName():
+                output = cli_parser.execShowCmd("show l2rib internal permanently-frozen-list")
+
+                if cmd.showCliOutFormat() == nx_sdk_py.R_JSON:
+                    json_str = parseOutput(output)
+                    cmd.printConsole(json_str)
+                else:
+                    cmd.printConsole(output)
+
+            return True
+
+
+def sdkThread():
+    global cli_parser, sdk, event_hdlr, tmsg
+
+    sdk = nx_sdk_py.NxSdk.getSdkInst(len(sys.argv), sys.argv)
+    if not sdk:
+       return
+
+    sdk.setAppDesc('Frozen mac parsed output App')
+
+    tmsg = sdk.getTracer()
+    tmsg.event("[%s] Started service" % sdk.getAppName())
+
+    cli_parser = sdk.getCliParser()
+
+    _ = cli_parser.newShowCmd("show_permanently-frozen-mac", "permanently-frozen-mac")
+    cmd_handler = pyCmdHandler()
+    cli_parser.setCmdHandler(cmd_handler)
+    cli_parser.addToParseTree()
+
+    tmsg.event("[{}] Starting event loop".format(sdk.getAppName()))
+    sdk.startEventLoop()
+
+    tmsg.event("Service Quitting...!")
+    nx_sdk_py.NxSdk.__swig_destroy__(sdk)
+
+
+cli_parser = 0
+sdk = 0
+tmsg = 0
+
+try:
+    sdkThread()
+except KeyboardInterrupt:
+    print("CTRL-C, exiting...")
+    sys.exit()
